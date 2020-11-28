@@ -213,11 +213,11 @@ int8_t readConfig() {
 
   // test config parameters
   if (cfg.wifiSSID == NULL || cfg.wifiPassword == NULL) {
-    Serial.println("Warning: No WIFI credentials found");
+    errorLog("Error: No WIFI credentials found");
     return -1;
   }
   if (cfg.mqttHost == NULL || cfg.mqttPort == 0) {
-    Serial.println("Warning: No MQTT server settings found");
+    errorLog("Error: No MQTT server settings found");
     return -2;
   }
   if (cfg.mqttTopTopic == NULL) {
@@ -360,7 +360,7 @@ void sleepNow() {
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   // check for disconnect reason
   if (mqttSuccessfull) {
-    Serial.println("MQTT disconnected");  // TODO: Fehler sollten in eine log-Datei und beim nächsten mal per MQQT versendet werden
+    Serial.println("MQTT disconnected");
   } else {
     errorLog("Error: MQTT disconnected unexpectedly because of this: ");
     switch(reason) {
