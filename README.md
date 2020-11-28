@@ -20,7 +20,7 @@ The maximum file size of your config is limited to 512 bytes. You can test your 
 #### Options of config.json
 
 Option | Description
---- | --- | ---
+--- | ---
 **wifi_ssid** | SSID of your WiFi
 **wifi_pw** | Passsword of your WiFi
 **mqtt_host** | IP address of your MQTT master
