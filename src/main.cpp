@@ -28,14 +28,13 @@
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
 #include <Wire.h>
-#include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include <SparkFunBME280.h>
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
 
 
 // I2C for BME280
-Adafruit_BME280 bme;
+BME280 bme;
 
 // struct for settings like network credentials
 struct Config {
@@ -153,17 +152,17 @@ void I2CRequest(uint8_t address, uint8_t bytes) {
 }
 
 float getTemperature() {
-  float temperature = bme.readTemperature();
+  float temperature = bme.readTempC();
   return temperature;
 }
   
 float getHumidity() {
-  float humidity = bme.readHumidity();
+  float humidity = bme.readFloatHumidity();
   return humidity;
 }
 
 float getPressure() {
-  float pressure = bme.readPressure()/ 100.0F;
+  float pressure = bme.readFloatPressure()/ 100.0F;
   return pressure;
 }
 
@@ -279,6 +278,11 @@ void onMqttConnect(bool sessionPresent) {
     Serial.println("Warning: Could not subscribe to config topic");
   }
 
+  // check if BME is still measuring
+  if (bme.isMeasuring()) {
+    errorLog("Error: BME 280 needs too long to measure");
+  }
+
   // read the temperature and send it to the MQTT broker
   float temp = getTemperature();
   mqttMessageList[0] = mqttClient.publish(tempTopic.c_str(), 1, true, String(temp).c_str());
@@ -290,7 +294,7 @@ void onMqttConnect(bool sessionPresent) {
   // read the pressure and send it to the MQTT broker
   float pressure = getPressure();
   // calculate the pressure for sea level
-  pressure = bme.seaLevelForAltitude(cfg.altitude, pressure);
+  pressure = pressure / pow(1.0 - (cfg.altitude / 44330.0), 5.255);
   mqttMessageList[2] = mqttClient.publish(presTopic.c_str(), 1, true, String(pressure).c_str());
 
   // read the battery voltage and send it to the MQTT broker
@@ -407,22 +411,17 @@ void setup(){
   Wire.setClockStretchLimit(1500);
 
   // Initialize the BME280 sensor
-  if (!bme.begin(I2C_ADD_BME280)) {
-    errorLog("FATAL: Could not find a valid BME280 sensor, check wiring!");
-    // turn off
-    sleepNow();
-  }
   // For more details on the following scenarious, see chapter
   // 3.5 "Recommended modes of operation" in the datasheet
-  bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                  Adafruit_BME280::SAMPLING_X1, // temperature
-                  Adafruit_BME280::SAMPLING_X1, // pressure
-                  Adafruit_BME280::SAMPLING_X1, // humidity
-                  Adafruit_BME280::FILTER_OFF);
-  bme.setTemperatureCompensation(cfg.temp_offset);
-  // take a measurement
-  if (!bme.takeForcedMeasurement()) {
-    errorLog("FATAL: Could not take measurements with BME280");
+  bme.settings.I2CAddress = I2C_ADD_BME280;
+  bme.settings.runMode = MODE_FORCED;
+  bme.settings.filter = 0;
+  bme.settings.tempOverSample = 1;
+  bme.settings.pressOverSample = 1;
+  bme.settings.humidOverSample = 1;
+  bme.settings.tempCorrection = cfg.temp_offset;
+  if (!bme.beginI2C()) {
+    errorLog("FATAL: Could not find a valid BME280 sensor, check wiring!");
     // turn off
     sleepNow();
   }
