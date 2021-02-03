@@ -106,7 +106,7 @@ String readAndRemoveOldErrors() {
     return String("");
   }
 
-  String messages = errorFile.readString();  // FIXME: Will this read the entire file?
+  String messages = errorFile.readString();
 
   errorFile.close();
   if (!LittleFS.remove(fileName)) {
@@ -439,7 +439,6 @@ void setup(){
         // We could not connect to wifi. Let's sleep now
         Serial.println("");
         errorLog("Error: Could not connect WIFI");
-        //startAP();
         sleepNow();
         break;
       }
