@@ -42,6 +42,8 @@ struct Config {
   String wifiPassword = "";
   String mqttHost = "";
   uint16_t mqttPort = 1883;
+  String mqttUser = "";
+  String mqttPassword = "";
   String mqttTopTopic = "";
   float altitude = 0.0;  // in m
   float temp_offset = 0.0;  // in °C
@@ -458,6 +460,9 @@ void setup(){
     mqttClient.onPublish(onMqttPublish);
     mqttClient.onMessage(onMqttMessage);
     mqttClient.setServer(cfg.mqttHost.c_str(), cfg.mqttPort);
+    if (cfg.mqttUser != "") {
+      mqttClient.setCredentials(cfg.mqttUser.c_str(), cfg.mqttPassword.c_str());
+    }
     Serial.print("Connect to MQTT Broker ");
     Serial.print(cfg.mqttHost);
     Serial.print(":");
