@@ -56,7 +56,7 @@ AsyncMqttClient mqttClient;
 bool mqttSuccessfull = 0;
 
 // Save all MQTT message ids to check if all messages were sent
-uint16_t mqttMessageList[6] = {0};
+uint16_t mqttMessageList[7] = {0};
 
 // If true the ESP will go to deep sleep without sending the off signal to the ATtiny
 bool fatal = false;
@@ -265,6 +265,22 @@ float getVoltage() {
   return (float)(voltage / 1000.0);  // from mV to V
 }
 
+bool updateSketch(char* payload, size_t size) { 
+  if (!Update.begin(size)) {
+    errorLog("ERROR: Could not start OTA update");
+    return false;
+  }
+  if (Update.write((uint8_t*)payload, size) != size) {
+    errorLog("ERROR: Could not write OTA update");
+    return false;
+  }
+  if (!Update.end()) {
+    errorLog("ERROR: Could not end OTA update");
+    return false;
+  }
+  return true;
+}
+
 void onMqttConnect(bool sessionPresent) {
   Serial.println("Connected to MQTT.");
 
@@ -272,8 +288,14 @@ void onMqttConnect(bool sessionPresent) {
   String humiTopic = cfg.mqttTopTopic + String("humidity");
   String presTopic = cfg.mqttTopTopic + String("pressure");
   String voltTopic = cfg.mqttTopTopic + String("voltage");
+  String otaTopic = cfg.mqttTopTopic + String("ota");
   String confTopic = cfg.mqttTopTopic + String("config");
   String errorsTopic = cfg.mqttTopTopic + String("errors");
+
+  // check for OTA update
+  if (!mqttClient.subscribe(otaTopic.c_str(), 1)) {
+    Serial.println("Warning: Could not subscribe to OTA topic");
+  }
 
   // subscribe to config. This can be used to change the config.json
   if (!mqttClient.subscribe(confTopic.c_str(), 1)) {
@@ -318,6 +340,10 @@ void onMqttPublish(uint16_t packetId) {
     // packetId was not in mqttMessageList
     return;
   }
+  if (i == 6) {  // TODO: Zahlen ändern in enum?
+    // Restart ESP because we made an sketch update
+    ESP.restart();
+  }
   mqttMessageList[i] = 0;
   if (arrayIsEmpty(mqttMessageList)) {
     // now we can disconnect
@@ -329,19 +355,27 @@ void onMqttPublish(uint16_t packetId) {
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
   Serial.println("MQTT message received");
+  String otaTopic = cfg.mqttTopTopic + String("ota");
   String confTopic = cfg.mqttTopTopic + String("config");
-  if (String(topic) != confTopic) {
+
+  if (String(topic) == confTopic) {
+
+    // Write the new config to LittleFS
+    String fixedStr = ((String)payload).substring(0,len);
+    writeConfig(fixedStr);
+    Serial.println("New config has been written");
+
+    // overwrite MQTT topic, so that we will not write it a second time to FS
+    mqttMessageList[5] = mqttClient.publish(confTopic.c_str(), 1, true, NULL);
+  } else if (String(topic) == otaTopic) {
+    // start update
+    updateSketch(payload, total);
+
+    // overwrite MQTT topic, so that we will not write it a second
+    mqttMessageList[6] = mqttClient.publish(otaTopic.c_str(), 1, true, NULL);
+  } else {
     Serial.println("Warning: Received a topic that we do not have a subscription to");
-    return;
   }
-
-  // Write the new config to LittleFS
-  String fixedStr = ((String)payload).substring(0,len);
-  writeConfig(fixedStr);
-  Serial.println("New config has been written");
-
-  // overwrite MQTT topic, so that we will not write it a second time to FS
-  mqttMessageList[5] = mqttClient.publish(confTopic.c_str(), 1, true, NULL);
 }
 
 void sleepNow() {
