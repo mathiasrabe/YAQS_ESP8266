@@ -37,4 +37,5 @@ You can debug the ESP8266 with the serial interface. Moreover the ESP will write
 
 ## OTA Update
 
-It is possible to make an OTA update over MQTT. You need to send the bin file to the topic `ota`.
+It is possible to make an OTA update over MQTT. You need to send the bin file to the topic `ota`. Example:
+`mosquitto_pub -h <mqtt_host> -t '<mqtt_top_topic>/ota' -r -f firmware.bin`

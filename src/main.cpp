@@ -56,14 +56,22 @@ AsyncMqttClient mqttClient;
 bool mqttSuccessfull = 0;
 
 // Save all MQTT message ids to check if all messages were sent
-uint16_t mqttMessageList[7] = {0};
+#define MQTT_LIST_SIZE 7
+uint16_t mqttMessageList[MQTT_LIST_SIZE] = {0};
+
+// Save the received size of all OTA update packages
+size_t receivedOTASize = 0;
+// We should not sleep when we are in an OTA update process
+bool delaySleep = false;
+// we need to restart after a successfull update
+bool espRestart = false;
 
 // If true the ESP will go to deep sleep without sending the off signal to the ATtiny
 bool fatal = false;
 
-int valueInArray(uint16_t val, uint16_t arr[]) {
+int valueInArray(uint16_t val, uint16_t arr[], uint16_t arr_size) {
   int16_t i;
-  for(i = 0; (uint16_t)i < sizeof(arr); i++)
+  for(i = 0; (uint16_t)i < arr_size; i++)
   {
     if(arr[i] == val)
       return i;
@@ -71,9 +79,9 @@ int valueInArray(uint16_t val, uint16_t arr[]) {
   return -1;
 }
 
-bool arrayIsEmpty(uint16_t arr[]) {
+bool arrayIsEmpty(uint16_t arr[], uint16_t arr_size) {
   uint16_t i;
-  for(i = 0; i < sizeof(arr); i++)
+  for(i = 0; i < arr_size; i++)
   {
     if(arr[i] != 0)
       return false;
@@ -265,20 +273,41 @@ float getVoltage() {
   return (float)(voltage / 1000.0);  // from mV to V
 }
 
-bool updateSketch(char* payload, size_t size) { 
-  if (!Update.begin(size)) {
-    errorLog("ERROR: Could not start OTA update");
-    return false;
+bool updateSketch(char* payload, size_t len, size_t index, size_t total) {
+  // This will install the update file received in several peckages (payload)
+  // This function will return true when the last peckage is written
+
+  // check if we received more data than expected
+  receivedOTASize += len;
+  if (receivedOTASize > total) {
+    errorLog("ERROR: OTA update is bigger than expected!");
   }
-  if (Update.write((uint8_t*)payload, size) != size) {
+
+  // Start update process if it is not running
+  if (!Update.isRunning()) {
+    Update.runAsync(true);
+    if (!Update.begin(total)) {
+      errorLog("ERROR: Could not start OTA update");
+      return false;
+    }
+    Serial.println("Start OTA update");
+  }
+  // write the received payload
+  //Serial.println("Writing OTA update");
+  if (Update.write((uint8_t*)payload, len) != len) {
     errorLog("ERROR: Could not write OTA update");
     return false;
   }
-  if (!Update.end()) {
-    errorLog("ERROR: Could not end OTA update");
-    return false;
+  // end update process when all packeges were received
+  if (receivedOTASize >= total) {
+    if (!Update.end()) {
+      errorLog("ERROR: Could not end OTA update");
+    } else {
+      Serial.println("End OTA update");
+    }
+    return true;
   }
-  return true;
+  return false;
 }
 
 void onMqttConnect(bool sessionPresent) {
@@ -300,11 +329,6 @@ void onMqttConnect(bool sessionPresent) {
   // subscribe to config. This can be used to change the config.json
   if (!mqttClient.subscribe(confTopic.c_str(), 1)) {
     Serial.println("Warning: Could not subscribe to config topic");
-  }
-
-  // check if BME is still measuring
-  if (bme.isMeasuring()) {
-    errorLog("Error: BME 280 needs too long to measure");
   }
 
   // read the temperature and send it to the MQTT broker
@@ -335,17 +359,18 @@ void onMqttConnect(bool sessionPresent) {
 void onMqttPublish(uint16_t packetId) {
   // if all values in mqttMessageList are 0 then no mqtt publish process remains and we can shut down
 
-  int16_t i = valueInArray(packetId, mqttMessageList);
+  int16_t i = valueInArray(packetId, mqttMessageList, MQTT_LIST_SIZE);
   if (i == -1) {
     // packetId was not in mqttMessageList
     return;
   }
   if (i == 6) {  // TODO: Zahlen ändern in enum?
     // Restart ESP because we made an sketch update
-    ESP.restart();
+    espRestart = true;
+    delaySleep = false;
   }
   mqttMessageList[i] = 0;
-  if (arrayIsEmpty(mqttMessageList)) {
+  if (arrayIsEmpty(mqttMessageList, MQTT_LIST_SIZE) && !delaySleep) {
     // now we can disconnect
     mqttSuccessfull = true;
     Serial.println("All messages has been published - disconnect now");
@@ -354,10 +379,13 @@ void onMqttPublish(uint16_t packetId) {
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-  Serial.println("MQTT message received");
+  // Serial.println("MQTT message received");
   String otaTopic = cfg.mqttTopTopic + String("ota");
   String confTopic = cfg.mqttTopTopic + String("config");
 
+  if (total <= 0) {
+    return;
+  }
   if (String(topic) == confTopic) {
 
     // Write the new config to LittleFS
@@ -368,33 +396,46 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     // overwrite MQTT topic, so that we will not write it a second time to FS
     mqttMessageList[5] = mqttClient.publish(confTopic.c_str(), 1, true, NULL);
   } else if (String(topic) == otaTopic) {
-    // start update
-    updateSketch(payload, total);
-
-    // overwrite MQTT topic, so that we will not write it a second
-    mqttMessageList[6] = mqttClient.publish(otaTopic.c_str(), 1, true, NULL);
+    // we should not sleep until we received the entire update
+    delaySleep = true;
+    // write ota update and restart when finished
+    if (updateSketch(payload, len, index, total)) {
+      Serial.println("OTA update was successful");
+      // overwrite MQTT topic, so that we will not write it a second
+      mqttMessageList[6] = mqttClient.publish(otaTopic.c_str(), 1, true, NULL);
+    }
   } else {
     Serial.println("Warning: Received a topic that we do not have a subscription to");
   }
 }
 
 void sleepNow() {
+  if (delaySleep) {
+    return;
+  } 
+  if (espRestart) {
+    // Restart ESP after OTA update
+    Serial.println("Restart ESP");
+    ESP.restart();
+    delay(100);
+    return;
+  }
   if (fatal) {
     // This is an emergancy because of disturbed I2C! The ESP will go to sleep and will not
     // send anything to the ATtiny so the 3.3V will remain enabled!
     errorLog("Emergancy shut down! ESP8266 will be send to deep sleep with 3.3V enabled!");
     ESP.deepSleep(ESP_EMERGANCY_SLEEP);  // 1e6 == 1 sec
     delay(100);
-  } else {
-    Serial.println("Good bye!");
-    // send off signal to ATtiny
-    Wire.beginTransmission(I2C_ADD_ATTINY);
-    // select the sleep register
-    Wire.write(ATTINY_REG_SLEEP);
-    // how long the system should be off
-    Wire.write(ATTINY_SLEEPTIME);
-    I2CEndTransmission();  // Beware! This will cause a recursion but should end up in ESP.deepSleep
+    return;
   }
+  Serial.println("Good bye!");
+  // send off signal to ATtiny
+  Wire.beginTransmission(I2C_ADD_ATTINY);
+  // select the sleep register
+  Wire.write(ATTINY_REG_SLEEP);
+  // how long the system should be off
+  Wire.write(ATTINY_SLEEPTIME);
+  I2CEndTransmission();  // Beware! This will cause a recursion but should end up in ESP.deepSleep
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -426,6 +467,7 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   // disconnect WIFI
   WiFi.disconnect();
   Serial.println("WiFi disconnected");
+  delay(1000);
   // turn off
   sleepNow();
 }
