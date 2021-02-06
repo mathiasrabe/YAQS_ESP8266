@@ -25,6 +25,8 @@ Option | Description
 **wifi_pw** | Passsword of your WiFi
 **mqtt_host** | IP address of your MQTT master
 **mqtt_port** | Port of your MQTT master
+**mqtt_user** | Username of your MQTT service, keep empty if no username is set
+**mqtt_pw** | Password of your MQTT service, keep empty if no password is set
 **mqtt_top_topic** | This string will be used for the MQTT topics. *mqtt_top_topic* will be supplemented by `temperature`, `humidity`, `pressure`, `voltage`, `config` and `errors`. Example: `sensors/temperature`
 **altitude** | The BME280 will return the actual air pressure which was measured. It is also possible to calculate the related preasure at sea level when you add the altitude of your localtion.
 **temp_offset** | If the temperature reading of your BME280 is not accurate enough you can define a correction offset.
@@ -32,3 +34,8 @@ Option | Description
 ## Debuging
 
 You can debug the ESP8266 with the serial interface. Moreover the ESP will write an error.log file to its file system. This file will be send via MQTT when the next connection is establshied. The topic `errors` will be used for that and the log file will be deleted afterwards.
+
+## OTA Update
+
+It is possible to make an OTA update over MQTT. You need to send the bin file to the topic `ota`. Example:
+`mosquitto_pub -h <mqtt_host> -t '<mqtt_top_topic>/ota' -r -f firmware.bin`
