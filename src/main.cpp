@@ -17,6 +17,10 @@
 #define ATTINY_REG_STAT 0x0
 #define ATTINY_REG_SLEEP 0x1
 #define ATTINY_REG_VCC 0x2
+#define ATTINY_REG_V1VREF 0x4
+#define ATTINY_REG_VCCMIN 0x6
+#define ATTINY_REG_VCCMAX 0x8
+#define ATTINY_REG_VCCHYST 0xA
 // How long should the device sleep between readings
 #define ATTINY_SLEEPTIME 0x70  // 15min*60sec / 8sec = 112,5 = 0x70
 // If there is no correct communication to the ATtiny the ESP8266 will go into deep sleep with 3.3V enabled.
@@ -29,26 +33,15 @@
 #include <LittleFS.h>
 #include <Wire.h>
 #include <SparkFunBME280.h>
-#include <ArduinoJson.h>
+//#include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
+
+#include "error.h"
+#include "config.h"
 
 
 // I2C for BME280
 BME280 bme;
-
-// struct for settings like network credentials
-struct Config {
-  String wifiSSID = "";
-  String wifiPassword = "";
-  String mqttHost = "";
-  uint16_t mqttPort = 1883;
-  String mqttUser = "";
-  String mqttPassword = "";
-  String mqttTopTopic = "";
-  float altitude = 0.0;  // in m
-  float temp_offset = 0.0;  // in °C
-};
-struct Config cfg;
 
 // Create asyncronous MQTT Client
 AsyncMqttClient mqttClient;
@@ -87,21 +80,6 @@ bool arrayIsEmpty(uint16_t arr[], uint16_t arr_size) {
       return false;
   }
   return true;
-}
-
-void errorLog(const char* message) {
-  // Write message to FS and print it to Serial
-  Serial.println(message);
-
-  File errorFile = LittleFS.open("error.log", "a");
-  
-  if (!errorFile) {
-    Serial.println("FATAL: Could not open error file for writing");
-    errorFile.close();
-    return;
-  }
-  errorFile.println(message);
-  errorFile.close();
 }
 
 String readAndRemoveOldErrors() {
@@ -176,76 +154,6 @@ float getPressure() {
   return pressure;
 }
 
-int8_t writeConfig(String message) {
-  File configFile = LittleFS.open("config.json", "w");
-  
-  if (!configFile) {
-    Serial.println("FATAL: Could not open config file for writing");
-    configFile.close();
-    return -1;
-  }
-  configFile.print(message);
-  configFile.close();
-  return 1;
-}
-
-int8_t readConfig() {
-  File configFile = LittleFS.open("config.json", "r");
-  const uint16_t fileSize = 512;
-
-  if (!configFile) {
-    errorLog("FATAL: No config file found");
-    configFile.close();
-    return -1;
-  }
-  Serial.println("Config file found");
-  size_t size = configFile.size();
-  if (size > fileSize) {
-    errorLog("FATAL: Config file size is too large");
-    return -1;
-  }
-
-  // Allocate the memory pool on the stack.
-  // Use arduinojson.org/assistant to compute the capacity.
-  StaticJsonDocument<fileSize> jsonDoc;
-
-  deserializeJson(jsonDoc, configFile);
-
-  // read keys and write them to the config struct
-  cfg.wifiSSID = jsonDoc["wifi_ssid"].as<String>();
-  cfg.wifiPassword = jsonDoc["wifi_pw"].as<String>();
-  cfg.mqttHost = jsonDoc["mqtt_host"].as<String>();
-  cfg.mqttPort = jsonDoc["mqtt_port"];
-  cfg.mqttTopTopic = jsonDoc["mqtt_top_topic"].as<String>();
-  cfg.altitude = jsonDoc["altitude"];
-  cfg.temp_offset = jsonDoc["temp_offset"];
-
-  // test config parameters
-  if (cfg.wifiSSID == NULL || cfg.wifiPassword == NULL) {
-    errorLog("Error: No WIFI credentials found");
-    return -1;
-  }
-  if (cfg.mqttHost == NULL || cfg.mqttPort == 0) {
-    errorLog("Error: No MQTT server settings found");
-    return -2;
-  }
-  if (cfg.mqttTopTopic == NULL) {
-    Serial.println("Warning: No MQTT top level topic found");
-    cfg.mqttTopTopic = "/";
-  } else if (!cfg.mqttTopTopic.endsWith("/")) {
-    cfg.mqttTopTopic += String("/");
-  }
-  /*
-  if (cfg.altitude == 0) {
-    Serial.println("Warning: No altitude found, using 0");
-  if (cfg.temp_offset == 0) {
-    Serial.println("Warning: No temperature offset found, using 0");
-  }*/
-
-  configFile.close();
-  return 1;
-}
-
 float getVoltage() {
   // Read status from ATtiny
   Wire.beginTransmission(I2C_ADD_ATTINY);
@@ -255,9 +163,9 @@ float getVoltage() {
   // Request 1 byte from ATtiny (status, sleep, low byte of voltage, high byte of voltage)
   I2CRequest(I2C_ADD_ATTINY, 1);
   uint8_t status = Wire.read();
-  if (status == 0) {
+  if (bitRead(status, 0) == 0) {
     // The ATtiny did not read any voltage?!
-    errorLog("Error: Status of ATtiny was 0");
+    errorLog("Error: ATtiny di not read any voltage");
   }
 
   // Read battery voltage from ATtiny
@@ -308,6 +216,30 @@ bool updateSketch(char* payload, size_t len, size_t index, size_t total) {
     return true;
   }
   return false;
+}
+
+void writeAttinySettings() {
+  Wire.beginTransmission(I2C_ADD_ATTINY);
+  // set the register to write settings
+  Wire.write(ATTINY_REG_V1VREF);
+  // write setttings to ATtiny
+  Serial.print("V1Ref: ");
+  Serial.println(cfg.tinyV1vref);
+  Serial.print("VCCmin: ");
+  Serial.println(cfg.tinyVccmin);
+  Serial.print("VCCmax: ");
+  Serial.println(cfg.tinyVccmax);
+  Serial.print("VCChyst: ");
+  Serial.println(cfg.tinyVcchyst);
+  Wire.write(lowByte(cfg.tinyV1vref));
+  Wire.write(highByte(cfg.tinyV1vref));
+  Wire.write(lowByte(cfg.tinyVccmin));
+  Wire.write(highByte(cfg.tinyVccmin));
+  Wire.write(lowByte(cfg.tinyVccmax));
+  Wire.write(highByte(cfg.tinyVccmax));
+  Wire.write(lowByte(cfg.tinyVcchyst));
+  Wire.write(highByte(cfg.tinyVcchyst));
+  I2CEndTransmission();
 }
 
 void onMqttConnect(bool sessionPresent) {
@@ -390,7 +322,11 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 
     // Write the new config to LittleFS
     String fixedStr = ((String)payload).substring(0,len);
-    writeConfig(fixedStr);
+    if (writeConfig(fixedStr) == 2) {
+      // settings of Attiny were changed, write them to Attiny
+      Serial.println("Write new Attiny settings");
+      writeAttinySettings();
+    }
     Serial.println("New config has been written");
 
     // overwrite MQTT topic, so that we will not write it a second time to FS
@@ -523,10 +459,25 @@ void setup(){
       delay(500);
       Serial.print(".");
     }
+    Serial.println("");
+
+    // Check status of ATtiny
+    Wire.beginTransmission(I2C_ADD_ATTINY);
+    Wire.write(ATTINY_REG_STAT);  // set the first register to read status from Attiny
+    I2CEndTransmission();
+    // Request 1 byte from ATtiny (status)
+    I2CRequest(I2C_ADD_ATTINY, 1);
+    uint8_t status = Wire.read();
+    Serial.print("ATtiny status: ");
+    Serial.println(status);
+    if (bitRead(status, 1) == 0) {
+      // The ATtiny EEPROM needs to be conditioned now
+      Serial.println("ATtiny is not conditioned. Writing settings to ATtiny");
+      writeAttinySettings();
+    }
 
     // Connect to MQTT
     // Print local IP address
-    Serial.println("");
     Serial.print("My IP is ");
     Serial.println(WiFi.localIP());
     

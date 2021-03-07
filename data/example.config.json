@@ -1,11 +1,15 @@
 {
-    "wifi_ssid": "Your WiFi SSID",
-    "wifi_pw": "WiFi Password",
-    "mqtt_host": "192.168.0.1",
-    "mqtt_port": 1883,
-    "mqtt_user": "",
-    "mqtt_pw": "",
-    "mqtt_top_topic": "sensors/",
-    "altitude": 0,
-    "temp_offset": 0.0
-  }
+  "wifi_ssid": "Your WiFi SSID",
+  "wifi_pw": "WiFi Password",
+  "mqtt_host": "192.168.0.1",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "mqtt_pw": "",
+  "mqtt_top_topic": "sensors/",
+  "altitude": 0,
+  "temp_offset": 0.0,
+  "tiny_v2vref": 1100,
+  "tiny_vccmin": 3700,
+  "tiny_vccmax": 4200,
+  "tiny_vcchyst": 4000
+}
