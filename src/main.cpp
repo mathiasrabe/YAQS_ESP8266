@@ -165,20 +165,28 @@ float getVoltage() {
   uint8_t status = Wire.read();
   if (bitRead(status, 0) == 0) {
     // The ATtiny did not read any voltage?!
-    errorLog("Error: ATtiny di not read any voltage");
+    errorLog("Error: ATtiny did not read any voltage");
   }
 
-  // Read battery voltage from ATtiny
-  Wire.beginTransmission(I2C_ADD_ATTINY);
-  // set the third register to read battery voltage from Attiny
-  Wire.write(ATTINY_REG_VCC);
-  I2CEndTransmission();
-  // Request 2 bytes from ATtiny (low byte of voltage, high byte of voltage)
-  I2CRequest(I2C_ADD_ATTINY, 2);
-  uint8_t voltage_low_byte = Wire.read();
-  uint8_t voltage_high_byte = Wire.read();
-  uint16_t voltage = makeWord(voltage_high_byte, voltage_low_byte);
-  return (float)(voltage / 1000.0);  // from mV to V
+  float voltage = 0.0;
+  for (uint8_t i = 1; i <= 2; i++) {
+    // Read battery voltage from ATtiny
+    Wire.beginTransmission(I2C_ADD_ATTINY);
+    // set the third register to read battery voltage from Attiny
+    Wire.write(ATTINY_REG_VCC);
+    I2CEndTransmission();
+    // Request 2 bytes from ATtiny (low byte of voltage, high byte of voltage)
+    I2CRequest(I2C_ADD_ATTINY, 2);
+    uint8_t voltage_low_byte = Wire.read();
+    uint8_t voltage_high_byte = Wire.read();
+    // uint16_t voltage = makeWord(voltage_high_byte, voltage_low_byte);
+    voltage = (float)makeWord(voltage_high_byte, voltage_low_byte) / 1000.0;  // from mV to V
+    // check if voltage is between its limits
+    if ((voltage > 1.8) && (voltage < 5.5)) {
+      break;
+    }
+  }
+  return voltage;
 }
 
 bool updateSketch(char* payload, size_t len, size_t index, size_t total) {
