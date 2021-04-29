@@ -368,6 +368,7 @@ void sleepNow() {
     // This is an emergancy because of disturbed I2C! The ESP will go to sleep and will not
     // send anything to the ATtiny so the 3.3V will remain enabled!
     errorLog("Emergancy shut down! ESP8266 will be send to deep sleep with 3.3V enabled!");
+    delay(3000);
     ESP.deepSleep(ESP_EMERGANCY_SLEEP);  // 1e6 == 1 sec
     delay(100);
     return;
