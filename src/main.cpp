@@ -476,6 +476,13 @@ void setup(){
     }
     Serial.println("");
 
+    // take a measurement
+    if (!bme.takeForcedMeasurement()) {
+      errorLog("FATAL: Could not take measurements with BME280");
+      // turn off
+      sleepNow();
+    }
+
     // Check status of ATtiny
     Wire.beginTransmission(I2C_ADD_ATTINY);
     Wire.write(ATTINY_REG_STAT);  // set the first register to read status from Attiny
